@@ -2,7 +2,7 @@
 
 A Taichi-based simulation demonstrating diffraction patterns from a grid of circular apertures.
 
-![Diffraction Pattern Simulation](images/example.mp4)
+![example](images/example.gif)
 ## Overview
 
 This project simulates diffraction patterns for multiple aperture-grid lattices (square, triangular, and hexagonal). The simulation displays both the aperture mask and the resulting diffraction pattern side-by-side.
