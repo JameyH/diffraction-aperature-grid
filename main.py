@@ -305,15 +305,16 @@ if __name__ == "__main__":
 
     # Control panel layout (top-left)
     panel_margin = 0.02
-    panel_height = 0.32
-    panel_y = 1.0 - panel_margin - panel_height
+    panel_width = .17
+    panel_height = .8
+    panel_y = 0
 
     # --- Main Loop ---
     while win.running:
         # ---- Top Control Panel (top-left) ----
-        with gui.sub_window("Controls", 0.02, panel_y, 0.96, panel_height):
+        with gui.sub_window("Controls", 0, panel_y, panel_width, panel_height):
             # Get current slider values (sliders return values directly)
-            z_val = gui.slider_float("Distance (m)", z_val, 1.0, 20.0)
+            z_val = gui.slider_float("Distance (m)", z_val, 1.0, 40.0)
             W_val = gui.slider_float("Aperture (mm)", W_val, 0.01, 0.10)
             d_val = gui.slider_float("Separation (mm)", d_val, 0.00, 0.20)
             lam_val = gui.slider_float("Wavelength (nm)", lam_val, 400.0, 700.0)
