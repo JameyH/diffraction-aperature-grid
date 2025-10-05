@@ -51,6 +51,11 @@ def _bring_app_to_front_macos():
 def compute_intensity():
     for i, j in intensity_field:
         amp = 0.0  # Declare amp
+        num_apertures = 0.0  # For center calculation
+        real_sum = 0.0  # For interference calculation
+        imag_sum = 0.0  # For interference calculation
+        x_pos = 0.0  # For hexagonal pattern positions
+        y_pos = 0.0  # For hexagonal pattern positions
         # Convert pixel indices to physical screen coordinates (meters)
         x_coord = (i - w / 2.0) * (screen_size[None] / w)
         y_coord = (j - h / 2.0) * (screen_size[None] / h)
@@ -58,38 +63,55 @@ def compute_intensity():
 
         if ti.abs(r_m) < 1e-12:
             # At the center, each aperture gives π/2 amplitude;
-            # For N x N apertures in phase, total amplitude is N*N*(π/2)
-            num_apertures = grid_size[None] * grid_size[None]
-            amp = (pi / 2.0) * num_apertures
+            # For square grids, total amplitude is N*N*(π/2)
+            # For hexagonal grid, total amplitude is 7*(π/2)
+            if grid_size[None] == 7:  # Hexagonal case
+                num_apertures = 7.0
+            else:
+                num_apertures = grid_size[None] * grid_size[None]
+            amp = (tm.pi / 2.0) * num_apertures
         else:
             # Single-aperture Airy envelope:
-            x_val = pi * W[None] * r_m / (lam_field[None] * z[None])
+            x_val = tm.pi * W[None] * r_m / (lam_field[None] * z[None])
             envelope = ti.abs(lam_field[None] * z[None] * j1(x_val) / (W[None] * r_m))
-            real_sum = 0.0
-            imag_sum = 0.0
 
             # Dynamic grid based on grid_size
             if grid_size[None] == 3:
                 # 3x3 grid: positions at (-d, 0, d) in both x and y
                 for m in ti.static(range(-1, 2)):
                     for n in ti.static(range(-1, 2)):
-                        phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
+                        phase = (2 * tm.pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
             elif grid_size[None] == 4:
                 # 4x4 grid: positions that expand symmetrically from center
                 for m in ti.static([-1.5, -0.5, 0.5, 1.5]):
                     for n in ti.static([-1.5, -0.5, 0.5, 1.5]):
-                        phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
+                        phase = (2 * tm.pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
-            else:  # grid_size == 5
+            elif grid_size[None] == 5:
                 # 5x5 grid: positions at (-2d, -d, 0, d, 2d) in both x and y
                 for m in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
                     for n in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
-                        phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
+                        phase = (2 * tm.pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
+            else:  # grid_size == 7 (hexagonal pattern)
+                # Hexagonal grid: 1 central + 6 surrounding apertures
+                # Central aperture at (0, 0)
+                phase = (2 * tm.pi / lam_field[None]) * ((0.0 * d[None] * x_coord + 0.0 * d[None] * y_coord) / z[None])
+                real_sum += ti.cos(phase)
+                imag_sum += ti.sin(phase)
+
+                # 6 surrounding apertures at distance d, 60-degree intervals
+                for angle in ti.static([0.0, 60.0, 120.0, 180.0, 240.0, 300.0]):
+                    angle_rad = tm.radians(angle)
+                    x_pos = d[None] * ti.cos(angle_rad)
+                    y_pos = d[None] * ti.sin(angle_rad)
+                    phase = (2 * tm.pi / lam_field[None]) * ((x_pos * x_coord + y_pos * y_coord) / z[None])
+                    real_sum += ti.cos(phase)
+                    imag_sum += ti.sin(phase)
 
             amp = envelope * ti.sqrt(real_sum * real_sum + imag_sum * imag_sum)
         intensity_field[i, j] = amp * amp
@@ -106,8 +128,12 @@ def normalize_intensity():
 
 @ti.kernel
 def compute_reference_intensity():
-    num_apertures = grid_size[None] * grid_size[None]
-    reference_intensity[None] = (num_apertures * (pi / 2.0))**2
+    num_apertures = 0.0  # Declare variable first
+    if grid_size[None] == 7:  # Hexagonal case
+        num_apertures = 7.0  # 1 center + 6 surrounding
+    else:
+        num_apertures = grid_size[None] * grid_size[None]
+    reference_intensity[None] = (num_apertures * (tm.pi / 2.0))**2
 
 # --- Mask Drawing: Show 3x3 grid of apertures as circles (left half) ---
 pixels_mask = ti.Vector.field(3, dtype=ti.u8, shape=(w, h))
@@ -125,6 +151,10 @@ def draw_mask():
     # Clear the mask to black.
     for i, j in pixels_mask:
         pixels_mask[i, j] = ti.Vector([ti.u8(0), ti.u8(0), ti.u8(0)])
+
+    # Declare variables for hexagonal pattern
+    offset_x = 0.0
+    offset_y = 0.0
 
     # Draw circles for all apertures in a single loop
     for i, j in pixels_mask:
@@ -146,7 +176,7 @@ def draw_mask():
                     cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
                     if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                         pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
-        else:  # grid_size == 5
+        elif grid_size[None] == 5:
             # 5x5 grid: positions at (-2d, -d, 0, d, 2d) in both x and y
             for m in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
                 for n in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
@@ -154,6 +184,21 @@ def draw_mask():
                     cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
                     if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                         pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+        else:  # grid_size == 7 (hexagonal pattern)
+            # Hexagonal grid: 1 central + 6 surrounding apertures
+            # Central aperture at (cx, cy)
+            if ti.sqrt((i - cx)**2 + (j - cy)**2) < aperture_pixel_radius:
+                pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+
+            # 6 surrounding apertures at distance d, 60-degree intervals
+            for angle in ti.static([0.0, 60.0, 120.0, 180.0, 240.0, 300.0]):
+                angle_rad = tm.radians(angle)
+                offset_x = separation_pixel * ti.cos(angle_rad)
+                offset_y = separation_pixel * ti.sin(angle_rad)
+                cx_i = cx + ti.cast(offset_x, ti.i32)
+                cy_i = cy + ti.cast(offset_y, ti.i32)
+                if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                    pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
 
 # --- Combined Display: Left shows mask; right shows diffraction pattern ---
 combined_pixels = ti.Vector.field(3, dtype=ti.u8, shape=(w * 2, h))
@@ -175,7 +220,10 @@ def update_base_color(wavelength: ti.f64):
 
 # --- GUI Setup ---
 if __name__ == "__main__":
-    gui = ti.GUI(f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction", (w * 2, h))
+    if grid_size[None] == 7:
+        gui = ti.GUI("Hexagonal Aperture Grid: Mask & Diffraction", (w * 2, h))
+    else:
+        gui = ti.GUI(f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction", (w * 2, h))
     _bring_app_to_front_macos()
 
     # --- Initialize Simulation Parameters ---
@@ -204,6 +252,7 @@ if __name__ == "__main__":
     grid_3x3_btn = gui.button('3x3 Grid')
     grid_4x4_btn = gui.button('4x4 Grid')
     grid_5x5_btn = gui.button('5x5 Grid')
+    grid_hexagonal_btn = gui.button('Hexagonal Grid')
 
     # --- Main Loop ---
     while gui.running:
@@ -229,6 +278,10 @@ if __name__ == "__main__":
                 grid_size[None] = 5
                 compute_reference_intensity()
                 gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
+            elif e.key == grid_hexagonal_btn:
+                grid_size[None] = 7
+                compute_reference_intensity()
+                gui.title = "Hexagonal Aperture Grid: Mask & Diffraction"
 
         compute_intensity()
         normalize_intensity()
