@@ -5,10 +5,25 @@ import os
 import subprocess
 from physics import j1
 from color import wavelength_to_rgb_func
+from grids import (
+    title_for_grid,
+    OFFSETS_4,
+    OFFSETS_5,
+    SMALL_HEXAGONAL_POINTS,
+    SMALL_TRIANGULAR_POINTS,
+    LARGE_TRIANGULAR_POINTS,
+    LARGE_HEXAGONAL_POINTS,
+)
 
 ti.init(default_fp=ti.f64)
 
 pi = tm.pi
+
+# Precomputed counts for grid options
+SMALL_TRI_COUNT = len(SMALL_TRIANGULAR_POINTS)
+SMALL_HEX_COUNT = len(SMALL_HEXAGONAL_POINTS)
+LARGE_TRI_COUNT = len(LARGE_TRIANGULAR_POINTS)
+LARGE_HEX_COUNT = len(LARGE_HEXAGONAL_POINTS)
 
 # Resolution for each image (mask and simulation)
 w = 600
@@ -64,11 +79,15 @@ def compute_intensity():
         if ti.abs(r_m) < 1e-12:
             # At the center, each aperture gives π/2 amplitude;
             # For square grids, total amplitude is N*N*(π/2)
-            # For hexagonal grid, total amplitude is 7*(π/2)
-            if grid_size[None] == 7:  # Small hexagonal case
-                num_apertures = 7.0
-            elif grid_size[None] == 8:  # Large hexagonal case
-                num_apertures = 31.0  # Using the 31 points provided
+            # For hexagonal/triangular grids, use the actual number of apertures
+            if grid_size[None] == 6:  # Small triangular
+                num_apertures = ti.cast(SMALL_TRI_COUNT, ti.f64)
+            elif grid_size[None] == 7:  # Small hexagonal
+                num_apertures = ti.cast(SMALL_HEX_COUNT, ti.f64)
+            elif grid_size[None] == 8:  # Large triangular
+                num_apertures = ti.cast(LARGE_TRI_COUNT, ti.f64)
+            elif grid_size[None] == 10:  # Large hexagonal
+                num_apertures = ti.cast(LARGE_HEX_COUNT, ti.f64)
             else:
                 num_apertures = grid_size[None] * grid_size[None]
             amp = (tm.pi / 2.0) * num_apertures
@@ -87,77 +106,36 @@ def compute_intensity():
                         imag_sum += ti.sin(phase)
             elif grid_size[None] == 4:
                 # 4x4 grid: positions that expand symmetrically from center
-                for m in ti.static([-1.5, -0.5, 0.5, 1.5]):
-                    for n in ti.static([-1.5, -0.5, 0.5, 1.5]):
+                for m in ti.static(OFFSETS_4):
+                    for n in ti.static(OFFSETS_4):
                         phase = (2 * tm.pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
             elif grid_size[None] == 5:
                 # 5x5 grid: positions at (-2d, -d, 0, d, 2d) in both x and y
-                for m in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
-                    for n in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                for m in ti.static(OFFSETS_5):
+                    for n in ti.static(OFFSETS_5):
                         phase = (2 * tm.pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
-            elif grid_size[None] == 7:  # Small hexagonal pattern (1 center + 6 surrounding)
-                # Hexagonal grid: 1 central + 6 surrounding apertures
-                # Central aperture at (0, 0)
-                phase = (2 * tm.pi / lam_field[None]) * ((0.0 * d[None] * x_coord + 0.0 * d[None] * y_coord) / z[None])
-                real_sum += ti.cos(phase)
-                imag_sum += ti.sin(phase)
-
-                # 6 surrounding apertures at distance d, 60-degree intervals
-                for angle in ti.static([0.0, 60.0, 120.0, 180.0, 240.0, 300.0]):
-                    angle_rad = tm.radians(angle)
-                    x_pos = d[None] * ti.cos(angle_rad)
-                    y_pos = d[None] * ti.sin(angle_rad)
-                    phase = (2 * tm.pi / lam_field[None]) * ((x_pos * x_coord + y_pos * y_coord) / z[None])
+            elif grid_size[None] == 6:  # Small triangular pattern (constant-defined)
+                # Use the exact coordinates provided for proper triangular lattice
+                for x_pos, y_pos in ti.static(SMALL_TRIANGULAR_POINTS):
+                    phase = (2 * tm.pi / lam_field[None]) * ((x_pos * d[None] * x_coord + y_pos * d[None] * y_coord) / z[None])
                     real_sum += ti.cos(phase)
                     imag_sum += ti.sin(phase)
-            else:  # grid_size == 8 (large hexagonal pattern with proper hexagonal lattice)
-                # Large hexagonal grid: 31 points as provided = 31 apertures total
-                # Use the exact coordinates provided for proper hexagonal lattice
-
-                # All 31 aperture positions for hexagonal lattice
-                for x_pos, y_pos in ti.static([
-                    (-0.5,  2.598076211353),
-                    (0.5,   2.598076211353),
-
-                    (-2.0,  1.732050807569),
-                    (-1.0,  1.732050807569),
-                    (0.0,   1.732050807569),
-                    (1.0,   1.732050807569),
-                    (2.0,   1.732050807569),
-
-                    (-2.5,  0.866025403784),
-                    (-1.5,  0.866025403784),
-                    (-0.5,  0.866025403784),
-                    (0.5,   0.866025403784),
-                    (1.5,   0.866025403784),
-                    (2.5,   0.866025403784),
-
-                    (-2.0,  0.0),
-                    (-1.0,  0.0),
-                    (0.0,   0.0),
-                    (1.0,   0.0),
-                    (2.0,   0.0),
-
-                    (-2.5, -0.866025403784),
-                    (-1.5, -0.866025403784),
-                    (-0.5, -0.866025403784),
-                    (0.5,  -0.866025403784),
-                    (1.5,  -0.866025403784),
-                    (2.5,  -0.866025403784),
-
-                    (-2.0, -1.732050807569),
-                    (-1.0, -1.732050807569),
-                    (0.0,  -1.732050807569),
-                    (1.0,  -1.732050807569),
-                    (2.0,  -1.732050807569),
-
-                    (-0.5, -2.598076211353),
-                    (0.5,  -2.598076211353),
-                ]):
+            elif grid_size[None] == 7:  # Small hexagonal pattern (constant-defined)
+                for x_pos, y_pos in ti.static(SMALL_HEXAGONAL_POINTS):
+                    phase = (2 * tm.pi / lam_field[None]) * ((x_pos * d[None] * x_coord + y_pos * d[None] * y_coord) / z[None])
+                    real_sum += ti.cos(phase)
+                    imag_sum += ti.sin(phase)
+            elif grid_size[None] == 8:  # Large triangular pattern (constant-defined)
+                for x_pos, y_pos in ti.static(LARGE_TRIANGULAR_POINTS):
+                    phase = (2 * tm.pi / lam_field[None]) * ((x_pos * d[None] * x_coord + y_pos * d[None] * y_coord) / z[None])
+                    real_sum += ti.cos(phase)
+                    imag_sum += ti.sin(phase)
+            elif grid_size[None] == 10:  # Large hexagonal pattern (constant-defined)
+                for x_pos, y_pos in ti.static(LARGE_HEXAGONAL_POINTS):
                     phase = (2 * tm.pi / lam_field[None]) * ((x_pos * d[None] * x_coord + y_pos * d[None] * y_coord) / z[None])
                     real_sum += ti.cos(phase)
                     imag_sum += ti.sin(phase)
@@ -178,10 +156,14 @@ def normalize_intensity():
 @ti.kernel
 def compute_reference_intensity():
     num_apertures = 0.0  # Declare variable first
-    if grid_size[None] == 7:  # Small hexagonal case
-        num_apertures = 7.0  # 1 center + 6 surrounding
-    elif grid_size[None] == 8:  # Large hexagonal case
-        num_apertures = 31.0  # Using the 31 points provided
+    if grid_size[None] == 6:  # Small triangular
+        num_apertures = ti.cast(SMALL_TRI_COUNT, ti.f64)
+    elif grid_size[None] == 7:  # Small hexagonal
+        num_apertures = ti.cast(SMALL_HEX_COUNT, ti.f64)
+    elif grid_size[None] == 8:  # Large triangular
+        num_apertures = ti.cast(LARGE_TRI_COUNT, ti.f64)
+    elif grid_size[None] == 10:  # Large hexagonal
+        num_apertures = ti.cast(LARGE_HEX_COUNT, ti.f64)
     else:
         num_apertures = grid_size[None] * grid_size[None]
     reference_intensity[None] = (num_apertures * (tm.pi / 2.0))**2
@@ -235,63 +217,26 @@ def draw_mask():
                     cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
                     if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                         pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
-        elif grid_size[None] == 7:  # Small hexagonal pattern
-            # Hexagonal grid: 1 central + 6 surrounding apertures
-            # Central aperture at (cx, cy)
-            if ti.sqrt((i - cx)**2 + (j - cy)**2) < aperture_pixel_radius:
-                pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
-
-            # 6 surrounding apertures at distance d, 60-degree intervals
-            for angle in ti.static([0.0, 60.0, 120.0, 180.0, 240.0, 300.0]):
-                angle_rad = tm.radians(angle)
-                offset_x = separation_pixel * ti.cos(angle_rad)
-                offset_y = separation_pixel * ti.sin(angle_rad)
-                cx_i = cx + ti.cast(offset_x, ti.i32)
-                cy_i = cy + ti.cast(offset_y, ti.i32)
+        elif grid_size[None] == 6:  # Small triangular pattern
+            for x_pos, y_pos in ti.static(SMALL_TRIANGULAR_POINTS):
+                cx_i = cx + ti.cast(x_pos * separation_pixel, ti.i32)
+                cy_i = cy + ti.cast(y_pos * separation_pixel, ti.i32)
                 if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                     pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
-        else:  # grid_size == 8 (large hexagonal pattern)
-            # Large hexagonal pattern: 31 points as provided
-            # Draw circles at all the specified hexagonal lattice positions
-            for x_pos, y_pos in ti.static([
-                (-0.5,  2.598076211353),
-                (0.5,   2.598076211353),
-
-                (-2.0,  1.732050807569),
-                (-1.0,  1.732050807569),
-                (0.0,   1.732050807569),
-                (1.0,   1.732050807569),
-                (2.0,   1.732050807569),
-
-                (-2.5,  0.866025403784),
-                (-1.5,  0.866025403784),
-                (-0.5,  0.866025403784),
-                (0.5,   0.866025403784),
-                (1.5,   0.866025403784),
-                (2.5,   0.866025403784),
-
-                (-2.0,  0.0),
-                (-1.0,  0.0),
-                (0.0,   0.0),
-                (1.0,   0.0),
-                (2.0,   0.0),
-
-                (-2.5, -0.866025403784),
-                (-1.5, -0.866025403784),
-                (-0.5, -0.866025403784),
-                (0.5,  -0.866025403784),
-                (1.5,  -0.866025403784),
-                (2.5,  -0.866025403784),
-
-                (-2.0, -1.732050807569),
-                (-1.0, -1.732050807569),
-                (0.0,  -1.732050807569),
-                (1.0,  -1.732050807569),
-                (2.0,  -1.732050807569),
-
-                (-0.5, -2.598076211353),
-                (0.5,  -2.598076211353),
-            ]):
+        elif grid_size[None] == 7:  # Small hexagonal pattern
+            for x_pos, y_pos in ti.static(SMALL_HEXAGONAL_POINTS):
+                cx_i = cx + ti.cast(x_pos * separation_pixel, ti.i32)
+                cy_i = cy + ti.cast(y_pos * separation_pixel, ti.i32)
+                if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                    pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+        elif grid_size[None] == 8:  # Large triangular pattern
+            for x_pos, y_pos in ti.static(LARGE_TRIANGULAR_POINTS):
+                cx_i = cx + ti.cast(x_pos * separation_pixel, ti.i32)
+                cy_i = cy + ti.cast(y_pos * separation_pixel, ti.i32)
+                if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                    pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+        elif grid_size[None] == 10:  # Large hexagonal pattern
+            for x_pos, y_pos in ti.static(LARGE_HEXAGONAL_POINTS):
                 cx_i = cx + ti.cast(x_pos * separation_pixel, ti.i32)
                 cy_i = cy + ti.cast(y_pos * separation_pixel, ti.i32)
                 if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
@@ -299,6 +244,7 @@ def draw_mask():
 
 # --- Combined Display: Left shows mask; right shows diffraction pattern ---
 combined_pixels = ti.Vector.field(3, dtype=ti.u8, shape=(w * 2, h))
+combined_pixels_f32 = ti.Vector.field(3, dtype=ti.f32, shape=(w * 2, h))
 
 @ti.kernel
 def combine_pixels():
@@ -308,6 +254,16 @@ def combine_pixels():
         else:
             combined_pixels[i, j] = pixels_screen[i - w, j]
 
+@ti.kernel
+def convert_combined_to_f32():
+    for i, j in combined_pixels:
+        c = combined_pixels[i, j]
+        combined_pixels_f32[i, j] = ti.Vector([
+            ti.cast(c[0], ti.f32) / 255.0,
+            ti.cast(c[1], ti.f32) / 255.0,
+            ti.cast(c[2], ti.f32) / 255.0,
+        ])
+
 """Wavelength-to-RGB conversion moved to color.py"""
 
 # --- Kernel to update the base color using the ti.func ---
@@ -316,13 +272,20 @@ def update_base_color(wavelength: ti.f64):
     base_color[None] = wavelength_to_rgb_func(wavelength)
 
 # --- GUI Setup ---
+# Helper to set window title across APIs
+def _set_window_title(win_obj, title: str):
+    try:
+        win_obj.title = title
+    except Exception:
+        pass
 if __name__ == "__main__":
-    if grid_size[None] == 7:
-        gui = ti.GUI("Hexagonal Aperture Grid: Mask & Diffraction", (w * 2, h))
-    elif grid_size[None] == 8:
-        gui = ti.GUI("Large Hexagonal Aperture Grid: Mask & Diffraction", (w * 2, h))
-    else:
-        gui = ti.GUI(f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction", (w * 2, h))
+    # Initialize grid selection before setting title
+    grid_size[None] = 3    # Start with 3x3 grid
+    initial_title = title_for_grid(grid_size[None])
+
+    win = ti.ui.Window(initial_title, (w * 2, h))
+    canvas = win.get_canvas()
+    gui = win.get_gui()
     _bring_app_to_front_macos()
 
     # --- Initialize Simulation Parameters ---
@@ -331,69 +294,82 @@ if __name__ == "__main__":
     screen_size[None] = 2.0  # Physical screen size (meters)
     d[None] = 0.05e-3      # Center-to-center separation (meters)
     lam_field[None] = 500e-9  # Wavelength (meters)
-    grid_size[None] = 3    # Start with 3x3 grid
 
     compute_reference_intensity()
+    
+    # --- Control Panel State (sliders return values directly) ---
+    z_val = z[None]
+    W_val = W[None] * 1e3
+    d_val = d[None] * 1e3
+    lam_val = lam_field[None] * 1e9
 
-    # --- Sliders for Adjusting Parameters ---
-    z_slider = gui.slider("Distance (m)", 1.0, 20.0)
-    W_slider = gui.slider("Aperture (mm)", 0.01, 0.10)
-    d_slider = gui.slider("Separation (mm)", 0.0, 0.2)
-    lam_slider = gui.slider("Wavelength (nm)", 400, 700)
-
-    # Set initial slider positions.
-    z_slider.value = z[None]
-    W_slider.value = W[None] * 1e3
-    d_slider.value = d[None] * 1e3
-    lam_slider.value = lam_field[None] * 1e9
-
-    # --- Buttons for Grid Selection ---
-    grid_3x3_btn = gui.button('3x3 Grid')
-    grid_4x4_btn = gui.button('4x4 Grid')
-    grid_5x5_btn = gui.button('5x5 Grid')
-    grid_hexagonal_btn = gui.button('Hexagonal Grid')
-    grid_large_hexagonal_btn = gui.button('Large Hexagonal Grid')
+    # Control panel layout (top-left)
+    panel_margin = 0.02
+    panel_height = 0.32
+    panel_y = 1.0 - panel_margin - panel_height
 
     # --- Main Loop ---
-    while gui.running:
-        z[None] = z_slider.value
-        W[None] = W_slider.value * 1e-3
-        d[None] = d_slider.value * 1e-3
-        lam_field[None] = lam_slider.value * 1e-9
+    while win.running:
+        # ---- Top Control Panel (top-left) ----
+        with gui.sub_window("Controls", 0.02, panel_y, 0.96, panel_height):
+            # Get current slider values (sliders return values directly)
+            z_val = gui.slider_float("Distance (m)", z_val, 1.0, 20.0)
+            W_val = gui.slider_float("Aperture (mm)", W_val, 0.01, 0.10)
+            d_val = gui.slider_float("Separation (mm)", d_val, 0.00, 0.20)
+            lam_val = gui.slider_float("Wavelength (nm)", lam_val, 400.0, 700.0)
 
-        # Update the base color using the Taichi function.
-        update_base_color(lam_slider.value)
-
-        # Handle button events for grid selection
-        for e in gui.get_events(gui.PRESS):
-            if e.key == grid_3x3_btn:
+            gui.text("Square Grids:")
+            # Create buttons and handle their events (all in same GUI context)
+            if gui.button("3x3"):
                 grid_size[None] = 3
                 compute_reference_intensity()
-                gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
-            elif e.key == grid_4x4_btn:
+                _set_window_title(win, title_for_grid(3))
+            if gui.button("4x4"):
                 grid_size[None] = 4
                 compute_reference_intensity()
-                gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
-            elif e.key == grid_5x5_btn:
+                _set_window_title(win, title_for_grid(4))
+            if gui.button("5x5"):
                 grid_size[None] = 5
                 compute_reference_intensity()
-                gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
-            elif e.key == grid_hexagonal_btn:
+                _set_window_title(win, title_for_grid(5))
+
+            gui.text("Hexagonal Grids:")
+            if gui.button(f"Small Hex ({SMALL_HEX_COUNT})"):
                 grid_size[None] = 7
                 compute_reference_intensity()
-                gui.title = "Hexagonal Aperture Grid: Mask & Diffraction"
-            elif e.key == grid_large_hexagonal_btn:
+                _set_window_title(win, title_for_grid(7))
+            if gui.button(f"Large Hex ({LARGE_HEX_COUNT})"):
+                grid_size[None] = 10
+                compute_reference_intensity()
+                _set_window_title(win, title_for_grid(10))
+
+            gui.text("Triangular Grids:")
+            if gui.button(f"Small Tri ({SMALL_TRI_COUNT})"):
+                grid_size[None] = 6
+                compute_reference_intensity()
+                _set_window_title(win, title_for_grid(6))
+            if gui.button(f"Large Tri ({LARGE_TRI_COUNT})"):
                 grid_size[None] = 8
                 compute_reference_intensity()
-                gui.title = "Large Hexagonal Aperture Grid: Mask & Diffraction"
+                _set_window_title(win, title_for_grid(8))
+
+        # Apply slider values to simulation fields
+        z[None] = z_val
+        W[None] = W_val * 1e-3
+        d[None] = d_val * 1e-3
+        lam_field[None] = lam_val * 1e-9
+
+        # Update the base color using the wavelength in nm
+        update_base_color(lam_val)
 
         compute_intensity()
         normalize_intensity()
         draw_mask()
         combine_pixels()
 
-        gui.set_image(combined_pixels)
-        gui.show()
+        convert_combined_to_f32()
+        canvas.set_image(combined_pixels_f32)
+        win.show()
         # Attempt to bring to front after first frame as some WMs ignore early requests
         if ti.static(False):
             _bring_app_to_front_macos()
