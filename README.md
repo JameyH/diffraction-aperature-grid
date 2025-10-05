@@ -1,12 +1,24 @@
-# 3x3 Aperture Grid Diffraction Simulation
+# Aperture Grid Diffraction Simulation
 
-A Taichi-based simulation demonstrating diffraction patterns from a 3x3 grid of circular apertures.
+A Taichi-based simulation demonstrating diffraction patterns from a grid of circular apertures.
 
-![Aperture grid diagram](images/example.png)
+<video src="images/example.mp4" controls width="640" poster="images/example.png"></video>
 
 ## Overview
 
-This project simulates the diffraction pattern produced by a 3x3 grid of circular apertures illuminated by coherent light. The simulation displays both the aperture mask and the resulting diffraction pattern side-by-side.
+This project simulates diffraction patterns for multiple aperture-grid lattices (square, triangular, and hexagonal). The simulation displays both the aperture mask and the resulting diffraction pattern side-by-side.
+## Grid Types
+
+- **Square grids**: 3x3, 4x4, 5x5
+- **Triangular grids**:
+  - Small triangular: 8 apertures
+  - Large triangular: 31 apertures
+- **Hexagonal grids**:
+  - Small hexagonal: 7 apertures (center + 6 neighbors)
+  - Large hexagonal: 24 apertures
+
+Use the buttons in the left control panel to switch between grid types.
+
 
 ## Physics Background
 
@@ -38,7 +50,7 @@ python main.py
 ```
 
 Use the interactive sliders to adjust:
-- Distance (1.0 - 20.0 m)
+- Distance (1.0 - 40.0 m)
 - Aperture size (0.01 - 0.10 mm)
 - Separation (0.0 - 0.2 mm)
 - Wavelength (400 - 700 nm)
@@ -55,6 +67,7 @@ Use the interactive sliders to adjust:
 - `main.py`: Entry point, configuration, Taichi field definitions, kernels, GUI loop
 - `physics.py`: Airy/Bessel-related Taichi functions
 - `color.py`: Wavelength to RGB Taichi function
+- `grids.py`: Grid constants (point sets and offsets) and grid title helper
 
 ## Dependencies
 
