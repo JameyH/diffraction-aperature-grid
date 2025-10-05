@@ -65,8 +65,10 @@ def compute_intensity():
             # At the center, each aperture gives π/2 amplitude;
             # For square grids, total amplitude is N*N*(π/2)
             # For hexagonal grid, total amplitude is 7*(π/2)
-            if grid_size[None] == 7:  # Hexagonal case
+            if grid_size[None] == 7:  # Small hexagonal case
                 num_apertures = 7.0
+            elif grid_size[None] == 8:  # Large hexagonal case
+                num_apertures = 31.0  # Using the 31 points provided
             else:
                 num_apertures = grid_size[None] * grid_size[None]
             amp = (tm.pi / 2.0) * num_apertures
@@ -97,7 +99,7 @@ def compute_intensity():
                         phase = (2 * tm.pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
-            else:  # grid_size == 7 (hexagonal pattern)
+            elif grid_size[None] == 7:  # Small hexagonal pattern (1 center + 6 surrounding)
                 # Hexagonal grid: 1 central + 6 surrounding apertures
                 # Central aperture at (0, 0)
                 phase = (2 * tm.pi / lam_field[None]) * ((0.0 * d[None] * x_coord + 0.0 * d[None] * y_coord) / z[None])
@@ -110,6 +112,53 @@ def compute_intensity():
                     x_pos = d[None] * ti.cos(angle_rad)
                     y_pos = d[None] * ti.sin(angle_rad)
                     phase = (2 * tm.pi / lam_field[None]) * ((x_pos * x_coord + y_pos * y_coord) / z[None])
+                    real_sum += ti.cos(phase)
+                    imag_sum += ti.sin(phase)
+            else:  # grid_size == 8 (large hexagonal pattern with proper hexagonal lattice)
+                # Large hexagonal grid: 31 points as provided = 31 apertures total
+                # Use the exact coordinates provided for proper hexagonal lattice
+
+                # All 31 aperture positions for hexagonal lattice
+                for x_pos, y_pos in ti.static([
+                    (-0.5,  2.598076211353),
+                    (0.5,   2.598076211353),
+
+                    (-2.0,  1.732050807569),
+                    (-1.0,  1.732050807569),
+                    (0.0,   1.732050807569),
+                    (1.0,   1.732050807569),
+                    (2.0,   1.732050807569),
+
+                    (-2.5,  0.866025403784),
+                    (-1.5,  0.866025403784),
+                    (-0.5,  0.866025403784),
+                    (0.5,   0.866025403784),
+                    (1.5,   0.866025403784),
+                    (2.5,   0.866025403784),
+
+                    (-2.0,  0.0),
+                    (-1.0,  0.0),
+                    (0.0,   0.0),
+                    (1.0,   0.0),
+                    (2.0,   0.0),
+
+                    (-2.5, -0.866025403784),
+                    (-1.5, -0.866025403784),
+                    (-0.5, -0.866025403784),
+                    (0.5,  -0.866025403784),
+                    (1.5,  -0.866025403784),
+                    (2.5,  -0.866025403784),
+
+                    (-2.0, -1.732050807569),
+                    (-1.0, -1.732050807569),
+                    (0.0,  -1.732050807569),
+                    (1.0,  -1.732050807569),
+                    (2.0,  -1.732050807569),
+
+                    (-0.5, -2.598076211353),
+                    (0.5,  -2.598076211353),
+                ]):
+                    phase = (2 * tm.pi / lam_field[None]) * ((x_pos * d[None] * x_coord + y_pos * d[None] * y_coord) / z[None])
                     real_sum += ti.cos(phase)
                     imag_sum += ti.sin(phase)
 
@@ -129,8 +178,10 @@ def normalize_intensity():
 @ti.kernel
 def compute_reference_intensity():
     num_apertures = 0.0  # Declare variable first
-    if grid_size[None] == 7:  # Hexagonal case
+    if grid_size[None] == 7:  # Small hexagonal case
         num_apertures = 7.0  # 1 center + 6 surrounding
+    elif grid_size[None] == 8:  # Large hexagonal case
+        num_apertures = 31.0  # Using the 31 points provided
     else:
         num_apertures = grid_size[None] * grid_size[None]
     reference_intensity[None] = (num_apertures * (tm.pi / 2.0))**2
@@ -184,7 +235,7 @@ def draw_mask():
                     cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
                     if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                         pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
-        else:  # grid_size == 7 (hexagonal pattern)
+        elif grid_size[None] == 7:  # Small hexagonal pattern
             # Hexagonal grid: 1 central + 6 surrounding apertures
             # Central aperture at (cx, cy)
             if ti.sqrt((i - cx)**2 + (j - cy)**2) < aperture_pixel_radius:
@@ -197,6 +248,52 @@ def draw_mask():
                 offset_y = separation_pixel * ti.sin(angle_rad)
                 cx_i = cx + ti.cast(offset_x, ti.i32)
                 cy_i = cy + ti.cast(offset_y, ti.i32)
+                if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                    pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+        else:  # grid_size == 8 (large hexagonal pattern)
+            # Large hexagonal pattern: 31 points as provided
+            # Draw circles at all the specified hexagonal lattice positions
+            for x_pos, y_pos in ti.static([
+                (-0.5,  2.598076211353),
+                (0.5,   2.598076211353),
+
+                (-2.0,  1.732050807569),
+                (-1.0,  1.732050807569),
+                (0.0,   1.732050807569),
+                (1.0,   1.732050807569),
+                (2.0,   1.732050807569),
+
+                (-2.5,  0.866025403784),
+                (-1.5,  0.866025403784),
+                (-0.5,  0.866025403784),
+                (0.5,   0.866025403784),
+                (1.5,   0.866025403784),
+                (2.5,   0.866025403784),
+
+                (-2.0,  0.0),
+                (-1.0,  0.0),
+                (0.0,   0.0),
+                (1.0,   0.0),
+                (2.0,   0.0),
+
+                (-2.5, -0.866025403784),
+                (-1.5, -0.866025403784),
+                (-0.5, -0.866025403784),
+                (0.5,  -0.866025403784),
+                (1.5,  -0.866025403784),
+                (2.5,  -0.866025403784),
+
+                (-2.0, -1.732050807569),
+                (-1.0, -1.732050807569),
+                (0.0,  -1.732050807569),
+                (1.0,  -1.732050807569),
+                (2.0,  -1.732050807569),
+
+                (-0.5, -2.598076211353),
+                (0.5,  -2.598076211353),
+            ]):
+                cx_i = cx + ti.cast(x_pos * separation_pixel, ti.i32)
+                cy_i = cy + ti.cast(y_pos * separation_pixel, ti.i32)
                 if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                     pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
 
@@ -222,6 +319,8 @@ def update_base_color(wavelength: ti.f64):
 if __name__ == "__main__":
     if grid_size[None] == 7:
         gui = ti.GUI("Hexagonal Aperture Grid: Mask & Diffraction", (w * 2, h))
+    elif grid_size[None] == 8:
+        gui = ti.GUI("Large Hexagonal Aperture Grid: Mask & Diffraction", (w * 2, h))
     else:
         gui = ti.GUI(f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction", (w * 2, h))
     _bring_app_to_front_macos()
@@ -253,6 +352,7 @@ if __name__ == "__main__":
     grid_4x4_btn = gui.button('4x4 Grid')
     grid_5x5_btn = gui.button('5x5 Grid')
     grid_hexagonal_btn = gui.button('Hexagonal Grid')
+    grid_large_hexagonal_btn = gui.button('Large Hexagonal Grid')
 
     # --- Main Loop ---
     while gui.running:
@@ -282,6 +382,10 @@ if __name__ == "__main__":
                 grid_size[None] = 7
                 compute_reference_intensity()
                 gui.title = "Hexagonal Aperture Grid: Mask & Diffraction"
+            elif e.key == grid_large_hexagonal_btn:
+                grid_size[None] = 8
+                compute_reference_intensity()
+                gui.title = "Large Hexagonal Aperture Grid: Mask & Diffraction"
 
         compute_intensity()
         normalize_intensity()
