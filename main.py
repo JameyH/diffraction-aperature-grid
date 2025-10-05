@@ -76,13 +76,18 @@ def compute_intensity():
                         phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
-            else:  # grid_size == 4
-                # 4x4 grid: positions at (-1.5d, -0.5d, 0.5d, 1.5d) in both x and y
-                for m in ti.static(range(-2, 2)):
-                    for n in ti.static(range(-2, 2)):
-                        m_pos = m * 0.5  # -1.5, -0.5, 0.5, 1.5
-                        n_pos = n * 0.5  # -1.5, -0.5, 0.5, 1.5
-                        phase = (2 * pi / lam_field[None]) * ((m_pos * d[None] * x_coord + n_pos * d[None] * y_coord) / z[None])
+            elif grid_size[None] == 4:
+                # 4x4 grid: positions that expand symmetrically from center
+                for m in ti.static([-1.5, -0.5, 0.5, 1.5]):
+                    for n in ti.static([-1.5, -0.5, 0.5, 1.5]):
+                        phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
+                        real_sum += ti.cos(phase)
+                        imag_sum += ti.sin(phase)
+            else:  # grid_size == 5
+                # 5x5 grid: positions at (-2d, -d, 0, d, 2d) in both x and y
+                for m in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                    for n in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                        phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
                         real_sum += ti.cos(phase)
                         imag_sum += ti.sin(phase)
 
@@ -132,14 +137,21 @@ def draw_mask():
                     cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
                     if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                         pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
-        else:  # grid_size == 4
-            # 4x4 grid: positions at (-1.5d, -0.5d, 0.5d, 1.5d) in both x and y
-            for m in ti.static(range(-2, 2)):
-                for n in ti.static(range(-2, 2)):
-                    m_pos = m * 0.5  # -1.5, -0.5, 0.5, 1.5
-                    n_pos = n * 0.5  # -1.5, -0.5, 0.5, 1.5
-                    cx_i = cx + ti.cast(m_pos * separation_pixel, ti.i32)
-                    cy_i = cy + ti.cast(n_pos * separation_pixel, ti.i32)
+        elif grid_size[None] == 4:
+            # 4x4 grid: positions that expand symmetrically from center
+            # Use explicit positions to ensure perfect centering
+            for m in ti.static([-1.5, -0.5, 0.5, 1.5]):
+                for n in ti.static([-1.5, -0.5, 0.5, 1.5]):
+                    cx_i = cx + ti.cast(m * separation_pixel, ti.i32)
+                    cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
+                    if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                        pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+        else:  # grid_size == 5
+            # 5x5 grid: positions at (-2d, -d, 0, d, 2d) in both x and y
+            for m in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                for n in ti.static([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                    cx_i = cx + ti.cast(m * separation_pixel, ti.i32)
+                    cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
                     if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
                         pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
 
@@ -191,6 +203,7 @@ if __name__ == "__main__":
     # --- Buttons for Grid Selection ---
     grid_3x3_btn = gui.button('3x3 Grid')
     grid_4x4_btn = gui.button('4x4 Grid')
+    grid_5x5_btn = gui.button('5x5 Grid')
 
     # --- Main Loop ---
     while gui.running:
@@ -210,6 +223,10 @@ if __name__ == "__main__":
                 gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
             elif e.key == grid_4x4_btn:
                 grid_size[None] = 4
+                compute_reference_intensity()
+                gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
+            elif e.key == grid_5x5_btn:
+                grid_size[None] = 5
                 compute_reference_intensity()
                 gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
 
