@@ -28,6 +28,9 @@ lam_field = ti.field(dtype=ti.f64, shape=())   # Wavelength (meters)
 
 reference_intensity = ti.field(dtype=ti.f64, shape=())
 
+# Grid size configuration
+grid_size = ti.field(dtype=ti.i32, shape=())  # 3 for 3x3, 4 for 4x4
+
 # Global base color (normalized RGB vector) for the diffraction image.
 base_color = ti.Vector.field(3, dtype=ti.f64, shape=())
 
@@ -55,20 +58,34 @@ def compute_intensity():
 
         if ti.abs(r_m) < 1e-12:
             # At the center, each aperture gives π/2 amplitude;
-            # For nine apertures in phase, total amplitude is 9*(π/2)
-            amp = (pi / 2.0) * 9.0
+            # For N x N apertures in phase, total amplitude is N*N*(π/2)
+            num_apertures = grid_size[None] * grid_size[None]
+            amp = (pi / 2.0) * num_apertures
         else:
             # Single-aperture Airy envelope:
             x_val = pi * W[None] * r_m / (lam_field[None] * z[None])
             envelope = ti.abs(lam_field[None] * z[None] * j1(x_val) / (W[None] * r_m))
             real_sum = 0.0
             imag_sum = 0.0
-            # Loop over a 3x3 grid: positions at (-d, 0, d) in both x and y.
-            for m in ti.static(range(-1, 2)):
-                for n in ti.static(range(-1, 2)):
-                    phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
-                    real_sum += ti.cos(phase)
-                    imag_sum += ti.sin(phase)
+
+            # Dynamic grid based on grid_size
+            if grid_size[None] == 3:
+                # 3x3 grid: positions at (-d, 0, d) in both x and y
+                for m in ti.static(range(-1, 2)):
+                    for n in ti.static(range(-1, 2)):
+                        phase = (2 * pi / lam_field[None]) * ((m * d[None] * x_coord + n * d[None] * y_coord) / z[None])
+                        real_sum += ti.cos(phase)
+                        imag_sum += ti.sin(phase)
+            else:  # grid_size == 4
+                # 4x4 grid: positions at (-1.5d, -0.5d, 0.5d, 1.5d) in both x and y
+                for m in ti.static(range(-2, 2)):
+                    for n in ti.static(range(-2, 2)):
+                        m_pos = m * 0.5  # -1.5, -0.5, 0.5, 1.5
+                        n_pos = n * 0.5  # -1.5, -0.5, 0.5, 1.5
+                        phase = (2 * pi / lam_field[None]) * ((m_pos * d[None] * x_coord + n_pos * d[None] * y_coord) / z[None])
+                        real_sum += ti.cos(phase)
+                        imag_sum += ti.sin(phase)
+
             amp = envelope * ti.sqrt(real_sum * real_sum + imag_sum * imag_sum)
         intensity_field[i, j] = amp * amp
 
@@ -84,7 +101,8 @@ def normalize_intensity():
 
 @ti.kernel
 def compute_reference_intensity():
-    reference_intensity[None] = (9.0 * (pi / 2.0))**2
+    num_apertures = grid_size[None] * grid_size[None]
+    reference_intensity[None] = (num_apertures * (pi / 2.0))**2
 
 # --- Mask Drawing: Show 3x3 grid of apertures as circles (left half) ---
 pixels_mask = ti.Vector.field(3, dtype=ti.u8, shape=(w, h))
@@ -102,14 +120,28 @@ def draw_mask():
     # Clear the mask to black.
     for i, j in pixels_mask:
         pixels_mask[i, j] = ti.Vector([ti.u8(0), ti.u8(0), ti.u8(0)])
-    # Draw nine white circles.
-    for m in ti.static(range(-1, 2)):
-        for n in ti.static(range(-1, 2)):
-            cx_i = cx + ti.cast(m * separation_pixel, ti.i32)
-            cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
-            for i, j in pixels_mask:
-                if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
-                    pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+
+    # Draw circles for all apertures in a single loop
+    for i, j in pixels_mask:
+        # Check all aperture positions for both grid sizes
+        if grid_size[None] == 3:
+            # 3x3 grid: positions at (-d, 0, d) in both x and y
+            for m in ti.static(range(-1, 2)):
+                for n in ti.static(range(-1, 2)):
+                    cx_i = cx + ti.cast(m * separation_pixel, ti.i32)
+                    cy_i = cy + ti.cast(n * separation_pixel, ti.i32)
+                    if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                        pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
+        else:  # grid_size == 4
+            # 4x4 grid: positions at (-1.5d, -0.5d, 0.5d, 1.5d) in both x and y
+            for m in ti.static(range(-2, 2)):
+                for n in ti.static(range(-2, 2)):
+                    m_pos = m * 0.5  # -1.5, -0.5, 0.5, 1.5
+                    n_pos = n * 0.5  # -1.5, -0.5, 0.5, 1.5
+                    cx_i = cx + ti.cast(m_pos * separation_pixel, ti.i32)
+                    cy_i = cy + ti.cast(n_pos * separation_pixel, ti.i32)
+                    if ti.sqrt((i - cx_i)**2 + (j - cy_i)**2) < aperture_pixel_radius:
+                        pixels_mask[i, j] = ti.Vector([ti.u8(255), ti.u8(255), ti.u8(255)])
 
 # --- Combined Display: Left shows mask; right shows diffraction pattern ---
 combined_pixels = ti.Vector.field(3, dtype=ti.u8, shape=(w * 2, h))
@@ -131,7 +163,7 @@ def update_base_color(wavelength: ti.f64):
 
 # --- GUI Setup ---
 if __name__ == "__main__":
-    gui = ti.GUI("3x3 Aperture Grid: Mask & Diffraction", (w * 2, h))
+    gui = ti.GUI(f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction", (w * 2, h))
     _bring_app_to_front_macos()
 
     # --- Initialize Simulation Parameters ---
@@ -140,6 +172,7 @@ if __name__ == "__main__":
     screen_size[None] = 2.0  # Physical screen size (meters)
     d[None] = 0.05e-3      # Center-to-center separation (meters)
     lam_field[None] = 500e-9  # Wavelength (meters)
+    grid_size[None] = 3    # Start with 3x3 grid
 
     compute_reference_intensity()
 
@@ -155,6 +188,10 @@ if __name__ == "__main__":
     d_slider.value = d[None] * 1e3
     lam_slider.value = lam_field[None] * 1e9
 
+    # --- Buttons for Grid Selection ---
+    grid_3x3_btn = gui.button('3x3 Grid')
+    grid_4x4_btn = gui.button('4x4 Grid')
+
     # --- Main Loop ---
     while gui.running:
         z[None] = z_slider.value
@@ -164,6 +201,17 @@ if __name__ == "__main__":
 
         # Update the base color using the Taichi function.
         update_base_color(lam_slider.value)
+
+        # Handle button events for grid selection
+        for e in gui.get_events(gui.PRESS):
+            if e.key == grid_3x3_btn:
+                grid_size[None] = 3
+                compute_reference_intensity()
+                gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
+            elif e.key == grid_4x4_btn:
+                grid_size[None] = 4
+                compute_reference_intensity()
+                gui.title = f"{grid_size[None]}x{grid_size[None]} Aperture Grid: Mask & Diffraction"
 
         compute_intensity()
         normalize_intensity()
